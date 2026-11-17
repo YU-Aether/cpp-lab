@@ -7,13 +7,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
 find_package(GTest REQUIRED)
+find_package(Threads REQUIRED)
 
 add_executable(ring_buffer_test tests/ring_buffer_test.cpp)
 target_include_directories(ring_buffer_test PRIVATE src)
 target_link_libraries(ring_buffer_test PRIVATE GTest::gtest_main)
-
-# -Werror 暂时不开：先让告警可见，等养成"零告警"习惯后再升级成错误
 target_compile_options(ring_buffer_test PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(spsc_queue_test tests/spsc_queue_test.cpp)
+target_include_directories(spsc_queue_test PRIVATE src)
+target_link_libraries(spsc_queue_test PRIVATE GTest::gtest_main Threads::Threads)
+target_compile_options(spsc_queue_test PRIVATE -Wall -Wextra -Wpedantic)
 
 include(GoogleTest)
 gtest_discover_tests(ring_buffer_test)
+gtest_discover_tests(spsc_queue_test)
