@@ -77,6 +77,11 @@ target_link_libraries(frame_source_test PRIVATE
 )
 target_compile_options(frame_source_test PRIVATE -Wall -Wextra -Wpedantic)
 
+add_executable(someip_test tests/someip_test.cpp)
+target_include_directories(someip_test PRIVATE src)
+target_link_libraries(someip_test PRIVATE GTest::gtest_main)
+target_compile_options(someip_test PRIVATE -Wall -Wextra -Wpedantic)
+
 include(GoogleTest)
 gtest_discover_tests(ring_buffer_test)
 gtest_discover_tests(spsc_queue_test)
@@ -87,3 +92,4 @@ gtest_discover_tests(frame_codec_test)
 gtest_discover_tests(main_window_test)
 gtest_discover_tests(echo_client_test)
 gtest_discover_tests(frame_source_test)
+gtest_discover_tests(someip_test)
