@@ -52,6 +52,7 @@ add_library(plantpulse_ui STATIC
     src/frame_codec.h
     src/frame_source.cpp
     src/frame_source.h
+    src/someip_codec.h
 )
 target_include_directories(plantpulse_ui PUBLIC src)
 target_link_libraries(plantpulse_ui PUBLIC Qt6::Widgets PRIVATE Qt6::Network)
