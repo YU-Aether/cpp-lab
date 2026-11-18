@@ -50,6 +50,8 @@ add_library(plantpulse_ui STATIC
     src/echo_client.cpp
     src/echo_client.h
     src/frame_codec.h
+    src/frame_source.cpp
+    src/frame_source.h
 )
 target_include_directories(plantpulse_ui PUBLIC src)
 target_link_libraries(plantpulse_ui PUBLIC Qt6::Widgets PRIVATE Qt6::Network)
@@ -66,6 +68,15 @@ add_executable(echo_client_test tests/echo_client_test.cpp)
 target_link_libraries(echo_client_test PRIVATE plantpulse_ui GTest::gtest Qt6::Test Threads::Threads)
 target_compile_options(echo_client_test PRIVATE -Wall -Wextra -Wpedantic)
 
+add_executable(frame_source_test tests/frame_source_test.cpp)
+target_link_libraries(frame_source_test PRIVATE
+    plantpulse_ui
+    GTest::gtest
+    Qt6::Test
+    Threads::Threads
+)
+target_compile_options(frame_source_test PRIVATE -Wall -Wextra -Wpedantic)
+
 include(GoogleTest)
 gtest_discover_tests(ring_buffer_test)
 gtest_discover_tests(spsc_queue_test)
@@ -75,3 +86,4 @@ gtest_discover_tests(epoll_echo_server_test)
 gtest_discover_tests(frame_codec_test)
 gtest_discover_tests(main_window_test)
 gtest_discover_tests(echo_client_test)
+gtest_discover_tests(frame_source_test)
