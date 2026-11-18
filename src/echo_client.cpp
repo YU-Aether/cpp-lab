@@ -2,6 +2,8 @@
 
 #include <QTcpSocket>
 
+#include <stdexcept>
+
 namespace lab {
 
 EchoClient::EchoClient(QObject* parent)
@@ -22,6 +24,9 @@ void EchoClient::connect_to(const QString& host, quint16 port)
     // 清理可能残留的旧连接，避免重复点击连接导致状态混乱。
     socket_->abort();
     connected_ = false;
+
+    // 新连接必须从干净缓冲开始，否则上一连接的半包会污染新数据。
+    decoder_ = FrameDecoder();
 
     socket_->connectToHost(host, port);
 }
@@ -47,7 +52,12 @@ void EchoClient::send(const QString& payload)
         return;
     }
 
-    socket_->write(payload.toUtf8());
+    // 发送前统一加上长度前缀，服务端按同样规则解析。
+    const QByteArray bytes = payload.toUtf8();
+    const std::string frame = encode_frame(
+        std::string(bytes.constData(), static_cast<std::size_t>(bytes.size())));
+
+    socket_->write(frame.data(), static_cast<qint64>(frame.size()));
 }
 
 bool EchoClient::is_connected() const
@@ -78,13 +88,26 @@ void EchoClient::handle_disconnected()
 
 void EchoClient::handle_ready_read()
 {
-    // TCP 是字节流，这里只做一次可读数据转发，不做消息边界处理。
     const QByteArray data = socket_->readAll();
     if (data.isEmpty()) {
         return;
     }
 
-    emit data_received(QString::fromUtf8(data));
+    // TCP 是字节流，收到的数据先进入解码器，再按完整帧逐条上报。
+    decoder_.append(data.constData(), static_cast<std::size_t>(data.size()));
+
+    std::string frame;
+    try {
+        while (decoder_.next_frame(frame)) {
+            emit data_received(
+                QString::fromUtf8(frame.data(), static_cast<int>(frame.size())));
+        }
+    } catch (const std::runtime_error& error) {
+        // 帧长度异常无法恢复，直接断开连接并上报原因。
+        socket_->abort();
+        connected_ = false;
+        emit error_occurred(QString::fromUtf8(error.what()));
+    }
 }
 
 void EchoClient::handle_error()

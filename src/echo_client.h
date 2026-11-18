@@ -1,5 +1,7 @@
 #pragma once
 
+#include "frame_codec.h"
+
 #include <QObject>
 #include <QString>
 #include <QtGlobal>
@@ -8,7 +10,7 @@ class QTcpSocket;
 
 namespace lab {
 
-// 封装 QTcpSocket，把网络事件转换成界面可直接使用的信号。
+// 封装 QTcpSocket，收发均按“长度前缀”协议处理。
 class EchoClient : public QObject {
     Q_OBJECT
 
@@ -36,6 +38,7 @@ private:
 
 private:
     QTcpSocket* socket_ = nullptr;
+    FrameDecoder decoder_;
     bool connected_ = false;
 };
 

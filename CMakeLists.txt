@@ -38,12 +38,18 @@ target_include_directories(epoll_echo_server_test PRIVATE src)
 target_link_libraries(epoll_echo_server_test PRIVATE GTest::gtest_main Threads::Threads)
 target_compile_options(epoll_echo_server_test PRIVATE -Wall -Wextra -Wpedantic)
 
+add_executable(frame_codec_test tests/frame_codec_test.cpp)
+target_include_directories(frame_codec_test PRIVATE src)
+target_link_libraries(frame_codec_test PRIVATE GTest::gtest_main)
+target_compile_options(frame_codec_test PRIVATE -Wall -Wextra -Wpedantic)
+
 # 界面与网络客户端编译成静态库，应用和测试共用同一份实现。
 add_library(plantpulse_ui STATIC
     src/main_window.cpp
     src/main_window.h
     src/echo_client.cpp
     src/echo_client.h
+    src/frame_codec.h
 )
 target_include_directories(plantpulse_ui PUBLIC src)
 target_link_libraries(plantpulse_ui PUBLIC Qt6::Widgets PRIVATE Qt6::Network)
@@ -66,5 +72,6 @@ gtest_discover_tests(spsc_queue_test)
 gtest_discover_tests(blocking_spsc_queue_test)
 gtest_discover_tests(blocking_echo_server_test)
 gtest_discover_tests(epoll_echo_server_test)
+gtest_discover_tests(frame_codec_test)
 gtest_discover_tests(main_window_test)
 gtest_discover_tests(echo_client_test)
