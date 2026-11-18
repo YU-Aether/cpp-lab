@@ -24,7 +24,13 @@ target_include_directories(blocking_spsc_queue_test PRIVATE src)
 target_link_libraries(blocking_spsc_queue_test PRIVATE GTest::gtest_main Threads::Threads)
 target_compile_options(blocking_spsc_queue_test PRIVATE -Wall -Wextra -Wpedantic)
 
+add_executable(blocking_echo_server_test tests/blocking_echo_server_test.cpp)
+target_include_directories(blocking_echo_server_test PRIVATE src)
+target_link_libraries(blocking_echo_server_test PRIVATE GTest::gtest_main Threads::Threads)
+target_compile_options(blocking_echo_server_test PRIVATE -Wall -Wextra -Wpedantic)
+
 include(GoogleTest)
 gtest_discover_tests(ring_buffer_test)
 gtest_discover_tests(spsc_queue_test)
 gtest_discover_tests(blocking_spsc_queue_test)
+gtest_discover_tests(blocking_echo_server_test)
