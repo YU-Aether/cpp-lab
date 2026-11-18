@@ -11,7 +11,7 @@ set(CMAKE_AUTOMOC ON)
 include(CTest)
 find_package(GTest REQUIRED)
 find_package(Threads REQUIRED)
-find_package(Qt6 REQUIRED COMPONENTS Widgets Test)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network Test)
 
 add_executable(ring_buffer_test tests/ring_buffer_test.cpp)
 target_include_directories(ring_buffer_test PRIVATE src)
@@ -38,13 +38,15 @@ target_include_directories(epoll_echo_server_test PRIVATE src)
 target_link_libraries(epoll_echo_server_test PRIVATE GTest::gtest_main Threads::Threads)
 target_compile_options(epoll_echo_server_test PRIVATE -Wall -Wextra -Wpedantic)
 
-# 界面代码编译成静态库，应用和测试共用同一份实现。
+# 界面与网络客户端编译成静态库，应用和测试共用同一份实现。
 add_library(plantpulse_ui STATIC
     src/main_window.cpp
     src/main_window.h
+    src/echo_client.cpp
+    src/echo_client.h
 )
 target_include_directories(plantpulse_ui PUBLIC src)
-target_link_libraries(plantpulse_ui PUBLIC Qt6::Widgets)
+target_link_libraries(plantpulse_ui PUBLIC Qt6::Widgets PRIVATE Qt6::Network)
 target_compile_options(plantpulse_ui PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(plantpulse_app src/main.cpp)
@@ -54,6 +56,10 @@ add_executable(main_window_test tests/main_window_test.cpp)
 target_link_libraries(main_window_test PRIVATE plantpulse_ui GTest::gtest Qt6::Test)
 target_compile_options(main_window_test PRIVATE -Wall -Wextra -Wpedantic)
 
+add_executable(echo_client_test tests/echo_client_test.cpp)
+target_link_libraries(echo_client_test PRIVATE plantpulse_ui GTest::gtest Qt6::Test Threads::Threads)
+target_compile_options(echo_client_test PRIVATE -Wall -Wextra -Wpedantic)
+
 include(GoogleTest)
 gtest_discover_tests(ring_buffer_test)
 gtest_discover_tests(spsc_queue_test)
@@ -61,3 +67,4 @@ gtest_discover_tests(blocking_spsc_queue_test)
 gtest_discover_tests(blocking_echo_server_test)
 gtest_discover_tests(epoll_echo_server_test)
 gtest_discover_tests(main_window_test)
+gtest_discover_tests(echo_client_test)
