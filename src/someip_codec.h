@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace lab::someip {
 
@@ -40,16 +41,43 @@ enum class ReturnCode : std::uint8_t {
     WrongMessageType = 0x0A,
 };
 
-/// 一条完整的 SOME/IP 报文（不含 Size 字段，所有字段均已解析成大端值）。
+/// 一条完整的 SOME/IP 报文（所有多字节字段均已解析成大端值）。
 struct Message {
     std::uint16_t service_id = 0;
     std::uint16_t method_id = 0;
     std::uint16_t client_id = 0;
     std::uint16_t session_id = 0;
+    std::uint8_t protocol_version = kProtocolVersion;
     std::uint8_t interface_version = 0;
     MessageType message_type = MessageType::Request;
     ReturnCode return_code = ReturnCode::Ok;
     std::string payload;
+};
+
+/// 协议错误。异常里带上已解析出的头部，
+/// 服务端才能在"报文不可信"时依然回一条带正确标识的 Error。
+class ProtocolError : public std::runtime_error {
+public:
+    enum class Reason {
+        Truncated,       // 头部不足 16 字节
+        BadLength,       // 长度字段非法或与实际字节数不符
+        TooLarge,        // 载荷超过允许上限
+        VersionMismatch, // 协议版本不是 1
+    };
+
+    ProtocolError(Reason reason, const std::string& message, Message header = {})
+        : std::runtime_error(message)
+        , reason_(reason)
+        , header_(std::move(header))
+    {
+    }
+
+    Reason reason() const noexcept { return reason_; }
+    const Message& header() const noexcept { return header_; }
+
+private:
+    Reason reason_;
+    Message header_;
 };
 
 namespace detail {
@@ -70,10 +98,8 @@ inline void put_u32(std::string& out, std::uint32_t value)
 
 inline std::uint16_t read_u16(const char* data)
 {
-    const auto hi = static_cast<std::uint16_t>(
-        static_cast<std::uint8_t>(data[0]));
-    const auto lo = static_cast<std::uint16_t>(
-        static_cast<std::uint8_t>(data[1]));
+    const auto hi = static_cast<std::uint16_t>(static_cast<std::uint8_t>(data[0]));
+    const auto lo = static_cast<std::uint16_t>(static_cast<std::uint8_t>(data[1]));
     return static_cast<std::uint16_t>((hi << 8) | lo);
 }
 
@@ -86,35 +112,49 @@ inline std::uint32_t read_u32(const char* data)
     return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
 }
 
-/// 解析一块长度已经确认吻合的数据（头部 + 载荷）。
-inline Message parse(const char* data, std::size_t size)
+/// 只读头部字段，不做任何校验。调用方必须保证已有 16 字节。
+inline Message read_header(const char* data)
 {
-    if (size < kHeaderSize) {
-        throw std::runtime_error("SOME/IP 报文不足 16 字节头部");
-    }
-
-    const std::uint32_t length_field = read_u32(data + 4);
-    if (length_field < kMinLengthField) {
-        throw std::runtime_error("SOME/IP 长度字段小于 8");
-    }
-
-    const std::size_t payload_size = length_field - kMinLengthField;
-    if (size != kHeaderSize + payload_size) {
-        throw std::runtime_error("SOME/IP 报文长度与长度字段不符");
-    }
-
-    if (static_cast<std::uint8_t>(data[12]) != kProtocolVersion) {
-        throw std::runtime_error("SOME/IP 协议版本不匹配");
-    }
-
     Message msg;
     msg.service_id = read_u16(data);
     msg.method_id = read_u16(data + 2);
     msg.client_id = read_u16(data + 8);
     msg.session_id = read_u16(data + 10);
+    msg.protocol_version = static_cast<std::uint8_t>(data[12]);
     msg.interface_version = static_cast<std::uint8_t>(data[13]);
     msg.message_type = static_cast<MessageType>(static_cast<std::uint8_t>(data[14]));
     msg.return_code = static_cast<ReturnCode>(static_cast<std::uint8_t>(data[15]));
+    return msg;
+}
+
+/// 解析一块长度已经确认吻合的数据（头部 + 载荷）。
+inline Message parse(const char* data, std::size_t size)
+{
+    if (size < kHeaderSize) {
+        throw ProtocolError(ProtocolError::Reason::Truncated,
+                            "SOME/IP 报文不足 16 字节头部");
+    }
+
+    const Message header = read_header(data);
+
+    const std::uint32_t length_field = read_u32(data + 4);
+    if (length_field < kMinLengthField) {
+        throw ProtocolError(ProtocolError::Reason::BadLength,
+                            "SOME/IP 长度字段小于 8", header);
+    }
+
+    const std::size_t payload_size = length_field - kMinLengthField;
+    if (size != kHeaderSize + payload_size) {
+        throw ProtocolError(ProtocolError::Reason::BadLength,
+                            "SOME/IP 报文长度与长度字段不符", header);
+    }
+
+    if (header.protocol_version != kProtocolVersion) {
+        throw ProtocolError(ProtocolError::Reason::VersionMismatch,
+                            "SOME/IP 协议版本不匹配", header);
+    }
+
+    Message msg = header;
     msg.payload.assign(data + kHeaderSize, payload_size);
     return msg;
 }
@@ -133,7 +173,7 @@ inline std::string encode(const Message& msg)
     detail::put_u32(out, static_cast<std::uint32_t>(kMinLengthField + msg.payload.size()));
     detail::put_u16(out, msg.client_id);
     detail::put_u16(out, msg.session_id);
-    out.push_back(static_cast<char>(kProtocolVersion));
+    out.push_back(static_cast<char>(msg.protocol_version));
     out.push_back(static_cast<char>(msg.interface_version));
     out.push_back(static_cast<char>(msg.message_type));
     out.push_back(static_cast<char>(msg.return_code));
@@ -158,7 +198,7 @@ public:
     void append(const char* data, std::size_t size) { buffer_.append(data, size); }
     void append(const std::string& data) { buffer_.append(data); }
 
-    /// 取出一条完整报文。数据不足返回 false；协议错误抛 std::runtime_error。
+    /// 取出一条完整报文。数据不足返回 false；协议错误抛 ProtocolError。
     bool next_message(Message& out)
     {
         if (buffer_.size() < kHeaderSize) {
@@ -167,14 +207,18 @@ public:
 
         const std::uint32_t length_field = detail::read_u32(buffer_.data() + 4);
         if (length_field < kMinLengthField) {
+            const Message header = detail::read_header(buffer_.data());
             buffer_.clear();
-            throw std::runtime_error("SOME/IP 长度字段小于 8");
+            throw ProtocolError(ProtocolError::Reason::BadLength,
+                                "SOME/IP 长度字段小于 8", header);
         }
 
         const std::size_t payload_size = length_field - kMinLengthField;
         if (payload_size > max_payload_size_) {
+            const Message header = detail::read_header(buffer_.data());
             buffer_.clear();
-            throw std::runtime_error("SOME/IP 载荷超出允许上限");
+            throw ProtocolError(ProtocolError::Reason::TooLarge,
+                                "SOME/IP 载荷超出允许上限", header);
         }
 
         const std::size_t total = kHeaderSize + payload_size;

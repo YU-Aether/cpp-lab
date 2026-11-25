@@ -63,7 +63,7 @@ void EchoClient::send(const QString& payload)
     msg.session_id = session_id_;
 
     msg.interface_version = 1;
-    msg.message_type = someip::MessageType::Notification;
+    msg.message_type = someip::MessageType::Request;
     msg.return_code = someip::ReturnCode::Ok;
 
     const QByteArray utf8 = payload.toUtf8();

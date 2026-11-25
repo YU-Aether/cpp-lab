@@ -43,6 +43,7 @@ target_include_directories(frame_codec_test PRIVATE src)
 target_link_libraries(frame_codec_test PRIVATE GTest::gtest_main)
 target_compile_options(frame_codec_test PRIVATE -Wall -Wextra -Wpedantic)
 
+
 # 界面与网络客户端编译成静态库，应用和测试共用同一份实现。
 add_library(plantpulse_ui STATIC
     src/main_window.cpp
@@ -60,6 +61,11 @@ target_compile_options(plantpulse_ui PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(plantpulse_app src/main.cpp)
 target_link_libraries(plantpulse_app PRIVATE plantpulse_ui)
+
+add_executable(plantpulse_server src/plantpulse_server.cpp)
+target_include_directories(plantpulse_server PRIVATE src)
+target_link_libraries(plantpulse_server PRIVATE Threads::Threads)
+target_compile_options(plantpulse_server PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(main_window_test tests/main_window_test.cpp)
 target_link_libraries(main_window_test PRIVATE plantpulse_ui GTest::gtest Qt6::Test)
@@ -83,6 +89,11 @@ target_include_directories(someip_test PRIVATE src)
 target_link_libraries(someip_test PRIVATE GTest::gtest_main)
 target_compile_options(someip_test PRIVATE -Wall -Wextra -Wpedantic)
 
+add_executable(someip_server_test tests/someip_server_test.cpp)
+target_include_directories(someip_server_test PRIVATE src)
+target_link_libraries(someip_server_test PRIVATE GTest::gtest_main Threads::Threads)
+target_compile_options(someip_server_test PRIVATE -Wall -Wextra -Wpedantic)
+
 include(GoogleTest)
 gtest_discover_tests(ring_buffer_test)
 gtest_discover_tests(spsc_queue_test)
@@ -94,3 +105,4 @@ gtest_discover_tests(main_window_test)
 gtest_discover_tests(echo_client_test)
 gtest_discover_tests(frame_source_test)
 gtest_discover_tests(someip_test)
+gtest_discover_tests(someip_server_test)
