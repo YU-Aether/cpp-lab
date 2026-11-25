@@ -14,6 +14,7 @@ namespace {
 
 constexpr std::uint16_t kSdPort = 30490;
 const char* const kSdHost = "127.0.0.1";
+const char* const kSdGroup = "224.244.224.245";
 
 }  // namespace
 
@@ -25,22 +26,27 @@ int main(int argc, char* argv[])
     lab::EchoClient client;
     lab::SourceThread source;
 
-    // 连接动作：先做服务发现；成功用发现的地址，失败则按手动地址连接
+    // 连接动作：先多播发现，再单播发现，都失败才用手动地址
     QObject::connect(&window, &lab::MainWindow::connect_requested, &client,
                      [&client, &window](const QString& host, quint16 port) {
                          lab::someip::sd::DiscoveredService service;
                          lab::someip::sd::SdDiscoverer discoverer(lab::EchoClient::kServiceId);
 
-                         if (discoverer.discover(kSdHost, kSdPort,
-                                                 std::chrono::milliseconds(300), service)) {
+                         const bool found =
+                             discoverer.discover(kSdGroup, kSdPort,
+                                                 std::chrono::milliseconds(300), service) ||
+                             discoverer.discover(kSdHost, kSdPort,
+                                                 std::chrono::milliseconds(300), service);
+
+                         if (found) {
                              const QString address = QString::fromStdString(service.address);
+                             // 先把界面同步成真实目标，再发起连接
                              window.set_target(address, service.port);
                              window.set_status(QStringLiteral("已发现服务 %1:%2，正在连接…")
                                                    .arg(address)
                                                    .arg(service.port));
                              client.connect_to(address, service.port);
                          } else {
-                             // 不假装是自动发现：明确说明这次用的是手动地址
                              window.set_status(QStringLiteral("未发现服务，按手动地址 %1:%2 连接…")
                                                    .arg(host)
                                                    .arg(port));
@@ -54,11 +60,9 @@ int main(int argc, char* argv[])
                      &client, &lab::EchoClient::send);
 
     QObject::connect(&client, &lab::EchoClient::connected, &window,
-                     [&window, &source, &client] {
+                     [&window, &source] {
                          window.set_connected(true);
-                         window.set_status(QStringLiteral("已连接 %1:%2")
-                                               .arg(client.peer_host())
-                                               .arg(client.peer_port()));
+                         window.set_status(QStringLiteral("已连接"));
                          source.start(500);
                      });
     QObject::connect(&client, &lab::EchoClient::disconnected, &window,
@@ -92,9 +96,9 @@ int main(int argc, char* argv[])
                          window.append_received(line);
                      });
 
-    // 自动数据源：在途请求超过 3 条就跳过这一帧，避免服务端不回时超时堆积
     QObject::connect(&source, &lab::SourceThread::frame_produced, &client,
                      [&client](const QByteArray& payload) {
+                         // 在途请求过多就跳过这一帧，避免服务端不回时超时堆积
                          if (client.pending_request_count() >= 3) {
                              return;
                          }

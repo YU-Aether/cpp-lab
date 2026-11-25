@@ -3,6 +3,8 @@
 #include "sd_codec.h"
 
 #include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
@@ -67,16 +69,44 @@ private:
 
 }  // namespace detail
 
-/// 发现结果：服务实例的 IP 与 TCP 端口。
+/// 取本机第一个非回环 IPv4 地址；找不到时退回 127.0.0.1。
+///
+/// 多播场景下必须通告真实网卡地址，否则对端拿到 127.0.0.1 只能同机连通。
+inline std::string local_ipv4_address()
+{
+    ifaddrs* list = nullptr;
+    if (::getifaddrs(&list) != 0) {
+        return "127.0.0.1";
+    }
+
+    std::string result;
+    for (ifaddrs* item = list; item != nullptr; item = item->ifa_next) {
+        if (item->ifa_addr == nullptr || item->ifa_addr->sa_family != AF_INET) {
+            continue;
+        }
+        if ((item->ifa_flags & IFF_LOOPBACK) != 0) {
+            continue;
+        }
+
+        char text[INET_ADDRSTRLEN] = {};
+        const auto* addr = reinterpret_cast<const sockaddr_in*>(item->ifa_addr);
+        if (::inet_ntop(AF_INET, &addr->sin_addr, text, sizeof(text)) != nullptr) {
+            result = text;
+            break;
+        }
+    }
+
+    ::freeifaddrs(list);
+    return result.empty() ? "127.0.0.1" : result;
+}
+
+/// 发现结果。
 struct DiscoveredService {
     std::string address;
     std::uint16_t port = 0;
 };
 
-/// 服务端侧：监听 UDP，收到 FindService 就单播回 OfferService。
-///
-/// 这是简化版发现：不做多播，客户端需要预先知道 SD 端口，
-/// 但业务端口完全由 OfferService 动态告知。
+/// 服务端侧：监听 UDP，回应 FindService；可选周期向多播组广播 OfferService。
 class SdResponder {
 public:
     explicit SdResponder(std::uint16_t sd_port,
@@ -124,15 +154,55 @@ public:
 
     std::uint16_t port() const { return port_; }
 
+    /// 开启多播：加入指定组，并每隔 interval 主动广播一次 OfferService。
+    /// 必须在 run() 之前调用；要求构造时 sd_port 是固定值而不是 0。
+    void enable_multicast(const std::string& group,
+                          std::chrono::milliseconds interval = std::chrono::milliseconds(1000))
+    {
+        multicast_address_ = sockaddr_in{};
+        multicast_address_.sin_family = AF_INET;
+        multicast_address_.sin_port = htons(port_);
+        if (::inet_pton(AF_INET, group.c_str(), &multicast_address_.sin_addr) != 1) {
+            throw std::runtime_error("多播组地址非法: " + group);
+        }
+
+        ip_mreq membership{};
+        membership.imr_multiaddr = multicast_address_.sin_addr;
+        membership.imr_interface.s_addr = htonl(INADDR_ANY);
+        if (::setsockopt(socket_.get(), IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                         &membership, sizeof(membership)) != 0) {
+            throw std::runtime_error("加入多播组失败");
+        }
+
+        // 让同机的其它进程也能收到自己发的广播
+        unsigned char loop = 1;
+        unsigned char ttl = 1;
+        ::setsockopt(socket_.get(), IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+        ::setsockopt(socket_.get(), IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+
+        multicast_interval_ = interval;
+        multicast_enabled_ = true;
+    }
+
     /// 阻塞运行，直到 stop() 被调用。
     void run()
     {
+        auto next_broadcast = std::chrono::steady_clock::now();
+
         while (!stopped_.load(std::memory_order_relaxed)) {
             pollfd pfd{};
             pfd.fd = socket_.get();
             pfd.events = POLLIN;
 
-            if (::poll(&pfd, 1, 50) <= 0) {
+            const int ready = ::poll(&pfd, 1, 50);
+
+            if (multicast_enabled_ &&
+                std::chrono::steady_clock::now() >= next_broadcast) {
+                broadcast_offer();
+                next_broadcast = std::chrono::steady_clock::now() + multicast_interval_;
+            }
+
+            if (ready <= 0 || (pfd.revents & POLLIN) == 0) {
                 continue;
             }
 
@@ -186,8 +256,16 @@ private:
             ::sendto(socket_.get(), reply.data(), reply.size(), 0,
                      reinterpret_cast<const sockaddr*>(&peer), peer_len);
         } catch (const std::exception&) {
-            // 垃圾包或畸形报文一律忽略，不能让一个坏包打断整个服务
+            // 垃圾包或畸形报文一律忽略
         }
+    }
+
+    void broadcast_offer()
+    {
+        const std::string reply = build_offer();
+        ::sendto(socket_.get(), reply.data(), reply.size(), 0,
+                 reinterpret_cast<const sockaddr*>(&multicast_address_),
+                 sizeof(multicast_address_));
     }
 
     std::string build_offer() const
@@ -197,7 +275,7 @@ private:
 
         Entry entry;
         entry.type = EntryType::OfferService;
-        entry.num_options_first = 1;  // 只有一个 IPv4 Endpoint 选项
+        entry.num_options_first = 1;
         entry.service_id = service_id_;
         entry.instance_id = instance_id_;
         entry.major_version = 0x01;
@@ -222,9 +300,13 @@ private:
     std::uint16_t service_id_ = 0x1234;
     std::uint16_t instance_id_ = 0xFFFF;
     std::array<std::uint8_t, 4> advertised_address_{};
+
+    bool multicast_enabled_ = false;
+    sockaddr_in multicast_address_{};
+    std::chrono::milliseconds multicast_interval_{1000};
 };
 
-/// 客户端侧：发 FindService，等待 OfferService，解析出 IP + 端口。
+/// 客户端侧：发 FindService（单播或多播），等待 OfferService。
 class SdDiscoverer {
 public:
     explicit SdDiscoverer(std::uint16_t service_id = 0x1234)
@@ -233,6 +315,7 @@ public:
     }
 
     /// 成功返回 true 并填充 out；超时或报文非法返回 false。
+    /// sd_host 可以是单播地址，也可以是多播组地址。
     bool discover(const std::string& sd_host, std::uint16_t sd_port,
                   std::chrono::milliseconds timeout, DiscoveredService& out)
     {
@@ -246,6 +329,13 @@ public:
         target.sin_port = htons(sd_port);
         if (::inet_pton(AF_INET, sd_host.c_str(), &target.sin_addr) != 1) {
             return false;
+        }
+
+        if (IN_MULTICAST(ntohl(target.sin_addr.s_addr)) != 0) {
+            unsigned char loop = 1;
+            unsigned char ttl = 1;
+            ::setsockopt(socket.get(), IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+            ::setsockopt(socket.get(), IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
         }
 
         const std::string frame = build_find_request();

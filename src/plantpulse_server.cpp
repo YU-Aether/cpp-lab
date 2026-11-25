@@ -45,8 +45,11 @@ int main(int argc, char* argv[])
 
     try {
         lab::SomeipServer tcp_server(tcp_port);
-        // 把真实 TCP 端口通告出去，端口传 0 时也能正确发现
-        lab::someip::sd::SdResponder responder(sd_port, tcp_server.port());
+        // 多播场景下通告真实网卡地址，避免对端拿到 127.0.0.1
+        lab::someip::sd::SdResponder responder(
+            sd_port, tcp_server.port(), 0x1234, 0xFFFF,
+            lab::someip::sd::local_ipv4_address());
+        responder.enable_multicast("224.244.224.245", std::chrono::milliseconds(1000));
 
         std::thread tcp_thread([&tcp_server] { tcp_server.run(); });
         std::thread sd_thread([&responder] { responder.run(); });
@@ -54,6 +57,9 @@ int main(int argc, char* argv[])
         std::printf("SOME/IP 服务端已启动\n");
         std::printf("  TCP 业务端口: %u\n", tcp_server.port());
         std::printf("  SD  发现端口: %u\n", responder.port());
+        std::printf("  通告地址: %s\n", lab::someip::sd::local_ipv4_address().c_str());
+        std::printf("  多播组: 224.244.224.245:%u（每 1s 广播 OfferService）\n",
+                    responder.port());
         std::printf("按 Ctrl+C 退出\n");
         std::fflush(stdout);
 
