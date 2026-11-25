@@ -22,6 +22,9 @@ public:
     void set_status(const QString& text);
     void append_received(const QString& text);
 
+    // 把界面同步为“实际正在连接的目标”，避免输入值与真实目标不一致。
+    void set_target(const QString& host, quint16 port);
+
 signals:
     void connect_requested(const QString& host, quint16 port);
     void disconnect_requested();

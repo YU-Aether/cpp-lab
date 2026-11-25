@@ -54,6 +54,8 @@ add_library(plantpulse_ui STATIC
     src/frame_source.cpp
     src/frame_source.h
     src/someip_codec.h
+    src/request_tracker.h
+    src/frame_source.h
 )
 target_include_directories(plantpulse_ui PUBLIC src)
 target_link_libraries(plantpulse_ui PUBLIC Qt6::Widgets PRIVATE Qt6::Network)
@@ -104,6 +106,11 @@ target_include_directories(sd_discovery_test PRIVATE src)
 target_link_libraries(sd_discovery_test PRIVATE GTest::gtest_main Threads::Threads)
 target_compile_options(sd_discovery_test PRIVATE -Wall -Wextra -Wpedantic)
 
+add_executable(request_tracker_test tests/request_tracker_test.cpp)
+target_include_directories(request_tracker_test PRIVATE src)
+target_link_libraries(request_tracker_test PRIVATE GTest::gtest_main)
+target_compile_options(request_tracker_test PRIVATE -Wall -Wextra -Wpedantic)
+
 include(GoogleTest)
 gtest_discover_tests(ring_buffer_test)
 gtest_discover_tests(spsc_queue_test)
@@ -118,3 +125,4 @@ gtest_discover_tests(someip_test)
 gtest_discover_tests(someip_server_test)
 gtest_discover_tests(sd_codec_test)
 gtest_discover_tests(sd_discovery_test)
+gtest_discover_tests(request_tracker_test)

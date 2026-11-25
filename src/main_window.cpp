@@ -1,11 +1,12 @@
 #include "main_window.h"
-#include <QTextCursor>
+
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTextCursor>
 #include <QVBoxLayout>
 
 namespace lab {
@@ -92,6 +93,13 @@ void MainWindow::append_received(const QString& text)
     log_view_->moveCursor(QTextCursor::End);
     log_view_->insertPlainText(text + QLatin1Char('\n'));
     log_view_->ensureCursorVisible();
+}
+
+void MainWindow::set_target(const QString& host, quint16 port)
+{
+    // 同步为“实际正在连接的目标”，让界面显示值永远等于真实目标。
+    host_edit_->setText(host);
+    port_spin_->setValue(port);
 }
 
 void MainWindow::handle_connect_clicked()

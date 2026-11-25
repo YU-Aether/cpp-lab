@@ -8,6 +8,7 @@
 #include <QString>
 
 #include <chrono>
+#include <cstdint>
 
 namespace {
 
@@ -24,7 +25,7 @@ int main(int argc, char* argv[])
     lab::EchoClient client;
     lab::SourceThread source;
 
-    // 连接动作：先做服务发现，成功则用发现的地址，失败回退到界面填写值
+    // 连接动作：先做服务发现；成功用发现的地址，失败则按手动地址连接
     QObject::connect(&window, &lab::MainWindow::connect_requested, &client,
                      [&client, &window](const QString& host, quint16 port) {
                          lab::someip::sd::DiscoveredService service;
@@ -32,14 +33,17 @@ int main(int argc, char* argv[])
 
                          if (discoverer.discover(kSdHost, kSdPort,
                                                  std::chrono::milliseconds(300), service)) {
-                             window.set_status(
-                                 QStringLiteral("已发现服务 %1:%2，正在连接…")
-                                     .arg(QString::fromStdString(service.address))
-                                     .arg(service.port));
-                             client.connect_to(QString::fromStdString(service.address),
-                                               service.port);
+                             const QString address = QString::fromStdString(service.address);
+                             window.set_target(address, service.port);
+                             window.set_status(QStringLiteral("已发现服务 %1:%2，正在连接…")
+                                                   .arg(address)
+                                                   .arg(service.port));
+                             client.connect_to(address, service.port);
                          } else {
-                             window.set_status(QStringLiteral("未发现服务，使用手动地址"));
+                             // 不假装是自动发现：明确说明这次用的是手动地址
+                             window.set_status(QStringLiteral("未发现服务，按手动地址 %1:%2 连接…")
+                                                   .arg(host)
+                                                   .arg(port));
                              client.connect_to(host, port);
                          }
                      });
@@ -50,9 +54,11 @@ int main(int argc, char* argv[])
                      &client, &lab::EchoClient::send);
 
     QObject::connect(&client, &lab::EchoClient::connected, &window,
-                     [&window, &source] {
+                     [&window, &source, &client] {
                          window.set_connected(true);
-                         window.set_status(QStringLiteral("已连接"));
+                         window.set_status(QStringLiteral("已连接 %1:%2")
+                                               .arg(client.peer_host())
+                                               .arg(client.peer_port()));
                          source.start(500);
                      });
     QObject::connect(&client, &lab::EchoClient::disconnected, &window,
@@ -62,10 +68,18 @@ int main(int argc, char* argv[])
                          window.set_status(QStringLiteral("未连接"));
                      });
     QObject::connect(&client, &lab::EchoClient::error_occurred, &window,
-                     [&window, &source](const QString& message) {
+                     [&window, &source, &client](const QString& message) {
                          source.stop();
                          window.set_connected(false);
-                         window.set_status(QStringLiteral("连接错误: ") + message);
+                         window.set_status(QStringLiteral("连接 %1:%2 失败: %3")
+                                               .arg(client.peer_host())
+                                               .arg(client.peer_port())
+                                               .arg(message));
+                     });
+    QObject::connect(&client, &lab::EchoClient::request_timeout, &window,
+                     [&window](quint16 session_id) {
+                         window.append_received(
+                             QStringLiteral("请求超时，会话 %1 已放弃").arg(session_id));
                      });
 
     QObject::connect(&client, &lab::EchoClient::message_received, &window,
@@ -78,8 +92,12 @@ int main(int argc, char* argv[])
                          window.append_received(line);
                      });
 
+    // 自动数据源：在途请求超过 3 条就跳过这一帧，避免服务端不回时超时堆积
     QObject::connect(&source, &lab::SourceThread::frame_produced, &client,
                      [&client](const QByteArray& payload) {
+                         if (client.pending_request_count() >= 3) {
+                             return;
+                         }
                          client.send(QString::fromUtf8(payload));
                      });
 
