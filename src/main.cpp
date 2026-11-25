@@ -32,10 +32,8 @@ int main(int argc, char* argv[])
     lab::EchoClient client;
     lab::SourceThread source;
 
-    // 事件订阅状态：连接期间有效，断开即释放
     std::unique_ptr<lab::someip::sd::SdSubscriber> subscriber;
 
-    // 主线程轮询事件，每次最多阻塞 2ms，避免卡界面
     QTimer event_timer;
     event_timer.setInterval(100);
 
@@ -53,7 +51,6 @@ int main(int argc, char* argv[])
         }
     });
 
-    // 连接成功后订阅事件组
     auto start_subscription = [&] {
         subscriber.reset();
         try {
@@ -79,7 +76,6 @@ int main(int argc, char* argv[])
         }
     };
 
-    // 连接动作：先多播发现，再单播发现，都失败才用手动地址
     QObject::connect(&window, &lab::MainWindow::connect_requested, &client,
                      [&client, &window](const QString& host, quint16 port) {
                          lab::someip::sd::DiscoveredService service;
@@ -143,6 +139,12 @@ int main(int argc, char* argv[])
                          window.append_received(
                              QStringLiteral("请求超时，会话 %1 已放弃").arg(session_id));
                      });
+    QObject::connect(&client, &lab::EchoClient::e2e_failed, &window,
+                     [&window](quint16 session_id) {
+                         window.append_received(
+                             QStringLiteral("E2E 校验失败，会话 %1 的回包已丢弃")
+                                 .arg(session_id));
+                     });
 
     QObject::connect(&client, &lab::EchoClient::message_received, &window,
                      [&window](quint16 service_id, quint16 method_id, const QString& text) {
@@ -156,7 +158,6 @@ int main(int argc, char* argv[])
 
     QObject::connect(&source, &lab::SourceThread::frame_produced, &client,
                      [&client](const QByteArray& payload) {
-                         // 在途请求过多就跳过这一帧，避免服务端不回时超时堆积
                          if (client.pending_request_count() >= 3) {
                              return;
                          }

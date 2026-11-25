@@ -99,6 +99,12 @@ target_link_libraries(request_tracker_test PRIVATE GTest::gtest_main)
 target_compile_options(request_tracker_test PRIVATE -Wall -Wextra -Wpedantic)
 gtest_discover_tests(request_tracker_test)
 
+add_executable(e2e_protection_test tests/e2e_protection_test.cpp)
+target_include_directories(e2e_protection_test PRIVATE src)
+target_link_libraries(e2e_protection_test PRIVATE GTest::gtest_main)
+target_compile_options(e2e_protection_test PRIVATE -Wall -Wextra -Wpedantic)
+gtest_discover_tests(e2e_protection_test)
+
 # ---------- Qt 库与可执行程序 ----------
 
 add_library(plantpulse_ui STATIC

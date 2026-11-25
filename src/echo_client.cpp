@@ -20,7 +20,6 @@ EchoClient::EchoClient(QObject* parent)
     connect(socket_, &QTcpSocket::readyRead, this, &EchoClient::handle_ready_read);
     connect(socket_, &QTcpSocket::errorOccurred, this, &EchoClient::handle_error);
 
-    // 扫描间隔要明显小于请求超时；默认超时 2000ms，这里 100ms 足够
     connect(retry_timer_, &QTimer::timeout, this, &EchoClient::check_timeouts);
     retry_timer_->start(100);
 }
@@ -44,7 +43,6 @@ std::size_t EchoClient::pending_request_count() const
 
 void EchoClient::connect_to(const QString& host, quint16 port)
 {
-    // 记录本次真实目标，供状态栏在成功/失败时显示
     host_ = host;
     port_ = port;
 
@@ -75,7 +73,6 @@ void EchoClient::send(const QString& payload)
         return;
     }
 
-    // Session ID 0 是保留值，回绕时跳过
     ++session_id_;
     if (session_id_ == 0) {
         session_id_ = 1;
@@ -95,6 +92,12 @@ bool EchoClient::is_connected() const
 
 void EchoClient::transmit(quint16 session_id, const QByteArray& payload)
 {
+    // 发送前加 E2E 头；计数器复用 session_id，重发时保持不变
+    e2e::Frame frame;
+    frame.counter = session_id;
+    frame.data_id = kE2eDataId;
+    frame.data.assign(payload.constData(), static_cast<std::size_t>(payload.size()));
+
     someip::Message msg;
     msg.service_id = kServiceId;
     msg.method_id = kMethodId;
@@ -103,10 +106,10 @@ void EchoClient::transmit(quint16 session_id, const QByteArray& payload)
     msg.interface_version = 1;
     msg.message_type = someip::MessageType::Request;
     msg.return_code = someip::ReturnCode::Ok;
-    msg.payload.assign(payload.constData(), static_cast<std::size_t>(payload.size()));
+    msg.payload = e2e::protect(frame);
 
-    const std::string frame = someip::encode(msg);
-    socket_->write(frame.data(), static_cast<qint64>(frame.size()));
+    const std::string bytes = someip::encode(msg);
+    socket_->write(bytes.data(), static_cast<qint64>(bytes.size()));
 }
 
 void EchoClient::check_timeouts()
@@ -152,17 +155,22 @@ void EchoClient::handle_ready_read()
     try {
         someip::Message msg;
         while (decoder_.next_message(msg)) {
-            const QString text = QString::fromUtf8(msg.payload.data(),
-                                                  static_cast<int>(msg.payload.size()));
-
             const bool is_reply = msg.message_type == someip::MessageType::Response ||
                                   msg.message_type == someip::MessageType::Error;
 
-            // 匹配到在途请求就消耗掉；是响应但匹配不上，说明是重发导致的重复回包
+            // 匹配到在途请求就消耗掉；响应但匹配不上的，是重发导致的重复回包
             if (!tracker_.acknowledge(msg.session_id) && is_reply) {
                 continue;
             }
 
+            // 接收侧校验：CRC 对不上说明数据在传输中被破坏
+            e2e::Frame frame;
+            if (!e2e::unprotect(msg.payload, frame)) {
+                emit e2e_failed(msg.session_id);
+                continue;
+            }
+
+            const QString text = QString::fromStdString(frame.data);
             emit message_received(msg.service_id, msg.method_id, text);
             emit data_received(text);
         }

@@ -1,21 +1,22 @@
 #pragma once
 
+#include "e2e_protection.h"
 #include "request_tracker.h"
 #include "someip_codec.h"
 
-#include <QByteArray>
 #include <QObject>
 #include <QString>
 #include <QtGlobal>
 
 #include <cstddef>
+#include <cstdint>
 
 class QTcpSocket;
 class QTimer;
 
 namespace lab {
 
-/// 基于 SOME/IP 报文的异步 TCP 客户端，带请求超时重发与重复响应去重。
+/// 基于 SOME/IP 报文的异步 TCP 客户端，带请求重发与 E2E 校验。
 class EchoClient : public QObject {
     Q_OBJECT
 
@@ -30,16 +31,15 @@ public:
 
     void set_request_timeout(int milliseconds);
     void set_max_retries(int count);
-
-    /// 还没收到响应的请求数量，供上层做流控。
     std::size_t pending_request_count() const;
-    /// 本次连接实际使用的目标，供界面显示真实地址。
+
     QString peer_host() const { return host_; }
     quint16 peer_port() const { return port_; }
 
     static constexpr quint16 kServiceId = 0x1234;
     static constexpr quint16 kMethodId = 0x0001;
     static constexpr quint16 kClientId = 0x0001;
+    static constexpr std::uint32_t kE2eDataId = 0x1234ABCD;
 
 signals:
     void connected();
@@ -47,6 +47,7 @@ signals:
     void data_received(const QString& text);
     void message_received(quint16 service_id, quint16 method_id, const QString& text);
     void request_timeout(quint16 session_id);
+    void e2e_failed(quint16 session_id);
     void error_occurred(const QString& message);
 
 private:
