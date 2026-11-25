@@ -69,23 +69,35 @@ target_link_libraries(sd_codec_test PRIVATE GTest::gtest_main)
 target_compile_options(sd_codec_test PRIVATE -Wall -Wextra -Wpedantic)
 gtest_discover_tests(sd_codec_test)
 
+add_executable(sd_eventgroup_test tests/sd_eventgroup_test.cpp)
+target_include_directories(sd_eventgroup_test PRIVATE src)
+target_link_libraries(sd_eventgroup_test PRIVATE GTest::gtest_main)
+target_compile_options(sd_eventgroup_test PRIVATE -Wall -Wextra -Wpedantic)
+gtest_discover_tests(sd_eventgroup_test)
+
 add_executable(sd_discovery_test tests/sd_discovery_test.cpp)
 target_include_directories(sd_discovery_test PRIVATE src)
 target_link_libraries(sd_discovery_test PRIVATE GTest::gtest_main Threads::Threads)
 target_compile_options(sd_discovery_test PRIVATE -Wall -Wextra -Wpedantic)
 gtest_discover_tests(sd_discovery_test)
 
-add_executable(request_tracker_test tests/request_tracker_test.cpp)
-target_include_directories(request_tracker_test PRIVATE src)
-target_link_libraries(request_tracker_test PRIVATE GTest::gtest_main)
-target_compile_options(request_tracker_test PRIVATE -Wall -Wextra -Wpedantic)
-gtest_discover_tests(request_tracker_test)
-
 add_executable(sd_multicast_test tests/sd_multicast_test.cpp)
 target_include_directories(sd_multicast_test PRIVATE src)
 target_link_libraries(sd_multicast_test PRIVATE GTest::gtest_main Threads::Threads)
 target_compile_options(sd_multicast_test PRIVATE -Wall -Wextra -Wpedantic)
 gtest_discover_tests(sd_multicast_test)
+
+add_executable(sd_subscription_test tests/sd_subscription_test.cpp)
+target_include_directories(sd_subscription_test PRIVATE src)
+target_link_libraries(sd_subscription_test PRIVATE GTest::gtest_main Threads::Threads)
+target_compile_options(sd_subscription_test PRIVATE -Wall -Wextra -Wpedantic)
+gtest_discover_tests(sd_subscription_test)
+
+add_executable(request_tracker_test tests/request_tracker_test.cpp)
+target_include_directories(request_tracker_test PRIVATE src)
+target_link_libraries(request_tracker_test PRIVATE GTest::gtest_main)
+target_compile_options(request_tracker_test PRIVATE -Wall -Wextra -Wpedantic)
+gtest_discover_tests(request_tracker_test)
 
 # ---------- Qt 库与可执行程序 ----------
 

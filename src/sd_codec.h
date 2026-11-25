@@ -38,7 +38,12 @@ enum class L4Protocol : std::uint8_t {
     Udp = 0x11,
 };
 
-/// 服务发现条目。FindService / OfferService 共用这一种布局。
+/// 服务发现条目。
+///
+/// 两种布局共用前 12 字节：
+///   - Type 1（FindService / OfferService）：字节 12-15 是 Minor Version
+///   - Type 2（SubscribeEventgroup / SubscribeEventgroupAck）：
+///     字节 12-13 保留，字节 14-15 是 Eventgroup ID
 struct Entry {
     EntryType type = EntryType::FindService;
     std::uint8_t index_first_options = 0;
@@ -49,10 +54,14 @@ struct Entry {
     std::uint16_t instance_id = 0;
     std::uint8_t major_version = 0;
     std::uint32_t ttl = 0;  // 仅低 24 位有效
+
+    // Type 1 专用
     std::uint32_t minor_version = 0;
+    // Type 2 专用
+    std::uint16_t eventgroup_id = 0;
 };
 
-/// IPv4 Endpoint 选项：告诉对端这个服务实例的 IP、传输层协议和端口。
+/// IPv4 Endpoint 选项。
 struct IPv4EndpointOption {
     std::array<std::uint8_t, 4> address{};
     L4Protocol protocol = L4Protocol::Tcp;
@@ -110,6 +119,13 @@ inline bool is_known_entry_type(std::uint8_t value)
     return false;
 }
 
+/// Type 2 的 entry 用 Eventgroup ID 取代 Minor Version。
+inline bool is_type2(EntryType type)
+{
+    return type == EntryType::SubscribeEventgroup ||
+           type == EntryType::SubscribeEventgroupAck;
+}
+
 inline void encode_entry(std::string& out, const Entry& entry)
 {
     put_u8(out, static_cast<std::uint8_t>(entry.type));
@@ -122,7 +138,13 @@ inline void encode_entry(std::string& out, const Entry& entry)
     put_u16(out, entry.instance_id);
     put_u8(out, entry.major_version);
     put_u24(out, entry.ttl & 0x00FFFFFF);
-    put_u32(out, entry.minor_version);
+
+    if (is_type2(entry.type)) {
+        put_u16(out, 0x0000);  // 保留
+        put_u16(out, entry.eventgroup_id);
+    } else {
+        put_u32(out, entry.minor_version);
+    }
 }
 
 inline Entry decode_entry(const char* data)
@@ -143,7 +165,12 @@ inline Entry decode_entry(const char* data)
     entry.instance_id = read_u16(data + 6);
     entry.major_version = read_u8(data + 8);
     entry.ttl = read_u24(data + 9);
-    entry.minor_version = read_u32(data + 12);
+
+    if (is_type2(entry.type)) {
+        entry.eventgroup_id = read_u16(data + 14);
+    } else {
+        entry.minor_version = read_u32(data + 12);
+    }
     return entry;
 }
 
@@ -191,7 +218,6 @@ inline std::string encode_payload(const Message& msg)
 /// 解码 SD 消息内容；任何结构性错误都抛 std::runtime_error。
 inline Message decode_payload(const std::string& payload)
 {
-    // Flags(1) + 保留(3) + 条目区长度(4)
     if (payload.size() < 8) {
         throw std::runtime_error("SOME/IP-SD 报文头不足");
     }

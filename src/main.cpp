@@ -6,15 +6,21 @@
 #include <QApplication>
 #include <QObject>
 #include <QString>
+#include <QTimer>
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
+#include <string>
 
 namespace {
 
 constexpr std::uint16_t kSdPort = 30490;
 const char* const kSdHost = "127.0.0.1";
 const char* const kSdGroup = "224.244.224.245";
+constexpr std::uint16_t kServiceId = 0x1234;
+constexpr std::uint16_t kInstanceId = 0xFFFF;
+constexpr std::uint16_t kEventgroupId = 0x0010;
 
 }  // namespace
 
@@ -25,6 +31,53 @@ int main(int argc, char* argv[])
     lab::MainWindow window;
     lab::EchoClient client;
     lab::SourceThread source;
+
+    // 事件订阅状态：连接期间有效，断开即释放
+    std::unique_ptr<lab::someip::sd::SdSubscriber> subscriber;
+
+    // 主线程轮询事件，每次最多阻塞 2ms，避免卡界面
+    QTimer event_timer;
+    event_timer.setInterval(100);
+
+    QObject::connect(&event_timer, &QTimer::timeout, [&window, &subscriber] {
+        if (!subscriber) {
+            return;
+        }
+        for (int i = 0; i < 8; ++i) {
+            std::string payload;
+            if (!subscriber->receive_event(payload, std::chrono::milliseconds(2))) {
+                break;
+            }
+            window.append_received(
+                QStringLiteral("[事件] %1").arg(QString::fromStdString(payload)));
+        }
+    });
+
+    // 连接成功后订阅事件组
+    auto start_subscription = [&] {
+        subscriber.reset();
+        try {
+            subscriber = std::make_unique<lab::someip::sd::SdSubscriber>(
+                kServiceId, kInstanceId, kEventgroupId);
+
+            const QString host = client.peer_host().isEmpty()
+                                     ? QString::fromLatin1(kSdHost)
+                                     : client.peer_host();
+
+            if (subscriber->subscribe(host.toStdString(), kSdPort,
+                                      std::chrono::milliseconds(300))) {
+                window.append_received(QStringLiteral("[事件] 已订阅事件组 0x0010"));
+                event_timer.start();
+            } else {
+                window.append_received(QStringLiteral("[事件] 订阅失败"));
+                subscriber.reset();
+            }
+        } catch (const std::exception& error) {
+            window.append_received(QStringLiteral("[事件] 订阅异常: %1")
+                                       .arg(QString::fromUtf8(error.what())));
+            subscriber.reset();
+        }
+    };
 
     // 连接动作：先多播发现，再单播发现，都失败才用手动地址
     QObject::connect(&window, &lab::MainWindow::connect_requested, &client,
@@ -40,7 +93,6 @@ int main(int argc, char* argv[])
 
                          if (found) {
                              const QString address = QString::fromStdString(service.address);
-                             // 先把界面同步成真实目标，再发起连接
                              window.set_target(address, service.port);
                              window.set_status(QStringLiteral("已发现服务 %1:%2，正在连接…")
                                                    .arg(address)
@@ -60,19 +112,25 @@ int main(int argc, char* argv[])
                      &client, &lab::EchoClient::send);
 
     QObject::connect(&client, &lab::EchoClient::connected, &window,
-                     [&window, &source] {
+                     [&window, &source, &start_subscription] {
                          window.set_connected(true);
                          window.set_status(QStringLiteral("已连接"));
                          source.start(500);
+                         start_subscription();
                      });
     QObject::connect(&client, &lab::EchoClient::disconnected, &window,
-                     [&window, &source] {
+                     [&window, &source, &subscriber, &event_timer] {
+                         event_timer.stop();
+                         subscriber.reset();
                          source.stop();
                          window.set_connected(false);
                          window.set_status(QStringLiteral("未连接"));
                      });
     QObject::connect(&client, &lab::EchoClient::error_occurred, &window,
-                     [&window, &source, &client](const QString& message) {
+                     [&window, &source, &subscriber, &event_timer, &client](
+                         const QString& message) {
+                         event_timer.stop();
+                         subscriber.reset();
                          source.stop();
                          window.set_connected(false);
                          window.set_status(QStringLiteral("连接 %1:%2 失败: %3")
