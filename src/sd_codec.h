@@ -300,4 +300,4 @@ inline std::string encode_frame(const Message& msg, std::uint16_t session_id = 0
     return someip::encode(outer);
 }
 
-}  // namespace lab::someip::sd
+}  // namespace lab::someip::sd 
